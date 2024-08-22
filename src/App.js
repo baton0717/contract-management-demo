@@ -1,10 +1,16 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { BrowserRouter as Router, Route, Routes, useNavigate, useLocation } from 'react-router-dom';  
 import jsPDF from 'jspdf';
 import 'jspdf-autotable';
 import { Bar, Pie } from 'react-chartjs-2';
 import 'chart.js/auto';
+import html2canvas from 'html2canvas';
+import * as XLSX from 'xlsx';
 import logo from './assets/images/doosan2.png';  // 로고 이미지 경로 수정
+
+const generateProjectCode = (id) => {
+  return `DS${String(id).padStart(6, '0')}`;
+};
 
 // Navigation 바
 const NavBar = () => {
@@ -215,25 +221,23 @@ const Dashboard = ({ projects }) => {
         {projects
           .slice()
           .sort((a, b) => b.uploadDate - a.uploadDate)
-          .slice(0, 10) // 최대 10개의 프로젝트만 표시
+          .slice(0, 10)
           .map((project) => (
             <li key={project.id} className="mb-2">
               <div className="flex justify-between">
                 <a href="#" onClick={() => window.location.href=`/ai-checklist/${project.id}`} className="text-blue-500 hover:underline">
-                  {project.name} - {project.description}
+                  {generateProjectCode(project.id)} - {project.name} - {project.description}
                 </a>
                 <span className={`font-semibold ${
-                  project.isComplete
+                  project.status === '최종검토 완료'
                     ? 'text-green-600'
                     : project.status === '검토중'
                     ? 'text-yellow-600'
+                    : project.status === '검토대기'
+                    ? 'text-orange-600'
                     : 'text-red-600'
                 }`}>
-                  {project.isComplete
-                    ? '최종검토 완료'
-                    : project.status === '검토중'
-                    ? '검토중'
-                    : '계약서 업로드 대기중'}
+                  {project.status}
                 </span>
               </div>
             </li>
@@ -277,6 +281,7 @@ const AIChecklist = ({ project, onComplete, setProjects }) => {
   const [isReviewComplete, setIsReviewComplete] = useState(project.isComplete || false);
   const [isPdfReady, setIsPdfReady] = useState(project.isComplete || false);
   const [allChecked, setAllChecked] = useState(false);
+  const contentRef = useRef(null);
 
   useEffect(() => {
     const allItemsChecked = checklist.every(category =>
@@ -289,6 +294,13 @@ const AIChecklist = ({ project, onComplete, setProjects }) => {
     const updatedChecklist = [...checklist];
     updatedChecklist[categoryIndex].items[itemIndex].currentComment = e.target.value;
     setChecklist(updatedChecklist);
+  };
+
+  const handleCommentKeyDown = (e, categoryIndex, itemIndex) => {
+    if (e.key === 'Enter') {
+      e.preventDefault(); // Enter 키로 줄 바꿈을 방지
+      handleAddComment(categoryIndex, itemIndex);
+    }
   };
 
   const handleAddComment = (categoryIndex, itemIndex) => {
@@ -305,13 +317,6 @@ const AIChecklist = ({ project, onComplete, setProjects }) => {
     updatedChecklist[categoryIndex].items[itemIndex].comments.unshift(newComment);
     updatedChecklist[categoryIndex].items[itemIndex].currentComment = ''; // 입력 후 입력란 초기화
     setChecklist(updatedChecklist);
-  };
-
-  const handleCommentKeyDown = (e, categoryIndex, itemIndex) => {
-    if (e.key === 'Enter') {
-      e.preventDefault(); // Enter 키로 줄 바꿈을 방지
-      handleAddComment(categoryIndex, itemIndex);
-    }
   };
 
   const handleCheckboxChange = (categoryIndex, itemIndex) => {
@@ -334,7 +339,39 @@ const AIChecklist = ({ project, onComplete, setProjects }) => {
   };
 
   const handlePdfDownload = () => {
-    // PDF 다운로드 코드
+    const input = contentRef.current;
+    if (input) {
+      html2canvas(input).then((canvas) => {
+        const imgData = canvas.toDataURL('image/png');
+        const pdf = new jsPDF('p', 'mm', 'a4');
+        const pdfWidth = pdf.internal.pageSize.getWidth();
+        const pdfHeight = pdf.internal.pageSize.getHeight();
+        const imgWidth = canvas.width;
+        const imgHeight = canvas.height;
+        const ratio = Math.min(pdfWidth / imgWidth, pdfHeight / imgHeight);
+        const imgX = (pdfWidth - imgWidth * ratio) / 2;
+        const imgY = 30;
+
+        pdf.addImage(imgData, 'PNG', imgX, imgY, imgWidth * ratio, imgHeight * ratio);
+        pdf.save(`AIChecklist_${project.name}.pdf`);
+      });
+    } else {
+      console.error("PDF 생성에 필요한 DOM 요소를 찾을 수 없습니다.");
+    }
+  };
+
+  const handleExcelDownload = () => {
+    const workbook = XLSX.utils.book_new();
+    checklist.forEach((category) => {
+      const worksheetData = category.items.map(item => ({
+        '항목': item.name,
+        '검토 결과': item.result,
+        '의견': item.comments.map(c => `${c.author}: ${c.text}`).join('; '),
+      }));
+      const worksheet = XLSX.utils.json_to_sheet(worksheetData);
+      XLSX.utils.book_append_sheet(workbook, worksheet, category.category);
+    });
+    XLSX.writeFile(workbook, `AIChecklist_${project.name}.xlsx`);
   };
 
   const handleSelectAll = (e) => {
@@ -351,132 +388,153 @@ const AIChecklist = ({ project, onComplete, setProjects }) => {
     return <div className="p-4">프로젝트를 선택해주세요.</div>;
   }
 
-  return (
-    <div className="p-8">
-      <h2 className="text-3xl font-semibold mb-8 text-gray-800">AI 체크리스트 - {project.name}</h2>
-      <table className="w-full border-collapse mb-8">
-        <thead>
-          <tr className="bg-gray-200">
-            <th className="p-4 text-center font-semibold text-gray-700">대분류</th>
-            <th className="p-4 text-center font-semibold text-gray-700">세부 항목</th>
-            <th className="p-4 text-center font-semibold text-gray-700">검토 결과</th>
-            <th className="p-4 text-center font-semibold text-gray-700">의견 작성</th>
-            <th className="p-4 text-center font-semibold text-gray-700">확인 완료</th> {/* 확인 완료 칸 추가 */}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-200">
-          {checklist.map((category, categoryIndex) => (
-            <React.Fragment key={categoryIndex}>
-              {category.items.map((item, itemIndex) => (
-                <tr key={itemIndex} className="bg-white">
-                  {itemIndex === 0 && (
-                    <td
-                      className="p-4 text-center font-semibold bg-gray-100"
-                      rowSpan={category.items.length}
-                    >
-                      {category.category}
-                    </td>
-                  )}
-                  <td className="p-4 text-center">{item.name}</td>
-                  <td className="p-4 text-center">
-                    <span
-                      className={`px-2 py-1 rounded-full text-sm font-semibold ${
-                        item.result === 'PASS'
-                          ? 'bg-green-200 text-green-800'
-                          : item.result === 'FAIL'
-                          ? 'bg-red-200 text-red-800'
-                          : 'bg-yellow-200 text-yellow-800'
-                      }`}
-                    >
-                      {item.result}
-                    </span>
-                  </td>
-                  <td className="p-4 text-center">
-                    <div className="flex items-center space-x-2">
-                      <input
-                        type="text"
-                        value={item.currentComment}
-                        onChange={(e) => handleCommentChange(e, categoryIndex, itemIndex)}
-                        onKeyDown={(e) => handleCommentKeyDown(e, categoryIndex, itemIndex)}
-                        className="w-full border border-gray-300 rounded-full p-2"
-                        placeholder="의견을 작성하세요"
-                        disabled={isReviewComplete}
-                      />
-                      <button
-                        onClick={() => handleAddComment(categoryIndex, itemIndex)}
-                        className="bg-blue-600 text-white px-4 py-2 rounded shadow-lg hover:bg-blue-700 transition ease-in-out duration-300"
-                        style={{ minWidth: '80px' }} // 버튼 크기 조정
-                        disabled={isReviewComplete}
-                      >
-                        입력
-                      </button>
-                    </div>
-                    <div className="mt-2 space-y-1">
-                      {item.comments.map((comment, index) => (
-                        <div key={index} className="flex justify-between text-sm text-gray-600">
-                          <span className="text-left">{comment.text}</span>
-                          <span className="text-right">
-                            <span className="font-semibold">{comment.author}</span> - <span className="text-xs">{comment.time}</span>
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </td>
-                  <td className="p-4 text-center"> {/* 확인 완료 칸 */}
-                    <input
-                      type="checkbox"
-                      checked={item.isChecked}
-                      onChange={() => handleCheckboxChange(categoryIndex, itemIndex)}
-                      disabled={isReviewComplete}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </React.Fragment>
-          ))}
-        </tbody>
-      </table>
-      <div className="flex justify-between space-x-4 mb-8">
-        <div className="flex items-center space-x-2">
-          <input
-            type="checkbox"
-            checked={allChecked}
-            onChange={handleSelectAll}
-            disabled={isReviewComplete}
-          />
-          <span>전체 확인 완료</span>
-        </div>
-        <div>
-          {isReviewComplete ? (
-            <button
-              onClick={handleReviewCancel}
-              className="bg-red-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-red-700 transition ease-in-out duration-300"
-            >
-              검토 취소
-            </button>
-          ) : (
-            <button
-              onClick={handleReviewComplete}
-              className={`bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg transition ease-in-out duration-300 ${allChecked ? 'hover:bg-blue-700' : 'cursor-not-allowed'}`}
-              disabled={!allChecked} // 모든 항목이 체크되어야 버튼 활성화
-            >
-              최종 검토 완료
-            </button>
-          )}
-          <button
-            onClick={handlePdfDownload}
-            className={`ml-4 px-6 py-3 rounded-full shadow-lg transition ease-in-out duration-300 ${
-              isPdfReady
-                ? 'bg-green-600 text-white hover:bg-green-700'
-                : 'bg-gray-400 text-white cursor-not-allowed'
-            }`}
-            disabled={!isPdfReady}
-          >
-            PDF 다운로드
-          </button>
+   return (
+    <>
+      <div className="flex justify-between items-center mb-8">
+        <h2 className="text-3xl font-semibold mb-8 text-gray-800">AI 체크리스트 - {project.name}</h2>
+        <div className="flex items-center space-x-4">
+          <label className="flex items-center space-x-2">
+            <input
+              type="checkbox"
+              checked={allChecked}
+              onChange={handleSelectAll}
+              disabled={isReviewComplete}
+              className="form-checkbox h-5 w-5 text-blue-600"
+            />
+            <span className="text-gray-700 font-medium">전체 확인 완료</span>
+          </label>
         </div>
       </div>
-    </div>
+      <div ref={contentRef}>
+        <table className="w-full border-collapse mb-8">
+          <thead>
+            <tr className="bg-gray-200">
+              <th className="p-4 text-center font-semibold text-gray-700">대분류</th>
+              <th className="p-4 text-center font-semibold text-gray-700">세부 항목</th>
+              <th className="p-4 text-center font-semibold text-gray-700">검토 결과</th>
+              <th className="p-4 text-center font-semibold text-gray-700">의견 작성</th>
+              <th className="p-4 text-center font-semibold text-gray-700">확인 완료</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {checklist.map((category, categoryIndex) => (
+              <React.Fragment key={categoryIndex}>
+                {category.items.map((item, itemIndex) => (
+                  <tr key={itemIndex} className="bg-white">
+                    {itemIndex === 0 && (
+                      <>
+                        <td
+                          className="p-4 text-center font-semibold bg-gray-100"
+                          rowSpan={category.items.length}
+                        >
+                          {category.category}
+                        </td>
+                      </>
+                    )}
+                    <td className="p-4 text-center">{item.name}</td>
+                    <td className="p-4 text-center">
+                      <span
+                        className={`px-2 py-1 rounded-full text-sm font-semibold ${
+                          item.result === 'PASS'
+                            ? 'bg-green-200 text-green-800'
+                            : item.result === 'FAIL'
+                            ? 'bg-red-200 text-red-800'
+                            : 'bg-yellow-200 text-yellow-800'
+                        }`}
+                      >
+                        {item.result}
+                      </span>
+                    </td>
+                    <td className="p-4 text-center">
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="text"
+                          value={item.currentComment}
+                          onChange={(e) => handleCommentChange(e, categoryIndex, itemIndex)}
+                          onKeyDown={(e) => handleCommentKeyDown(e, categoryIndex, itemIndex)}
+                          className="w-full border border-gray-300 rounded-full p-2"
+                          placeholder="의견을 작성하세요"
+                          disabled={isReviewComplete}
+                        />
+                        <button
+                          onClick={() => handleAddComment(categoryIndex, itemIndex)}
+                          className="bg-blue-600 text-white px-4 py-2 rounded shadow-lg hover:bg-blue-700 transition ease-in-out duration-300"
+                          style={{ minWidth: '80px' }}
+                          disabled={isReviewComplete}
+                        >
+                          입력
+                        </button>
+                      </div>
+                      <div className="mt-2 space-y-1">
+                        {item.comments.map((comment, index) => (
+                          <div key={index} className="flex justify-between text-sm text-gray-600">
+                            <span className="text-left">{comment.text}</span>
+                            <span className="text-right">
+                              <span className="font-semibold">{comment.author}</span> -{' '}
+                              <span className="text-xs">{comment.time}</span>
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="p-4 text-center">
+                      <input
+                        type="checkbox"
+                        checked={item.isChecked}
+                        onChange={() => handleCheckboxChange(categoryIndex, itemIndex)}
+                        disabled={isReviewComplete}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </React.Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex justify-end space-x-4">
+        {isReviewComplete ? (
+          <button
+            onClick={handleReviewCancel}
+            className="bg-red-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-red-700 transition ease-in-out duration-300"
+          >
+            검토 취소
+          </button>
+        ) : (
+          <button
+            onClick={handleReviewComplete}
+            className={`bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg transition ease-in-out duration-300 ${
+              allChecked ? 'hover:bg-blue-700' : 'cursor-not-allowed'
+            }`}
+            disabled={!allChecked}
+          >
+            최종 검토 완료
+          </button>
+        )}
+        <button
+          onClick={handlePdfDownload}
+          className={`px-6 py-3 rounded-full shadow-lg transition ease-in-out duration-300 ${
+            isPdfReady
+              ? 'bg-green-600 text-white hover:bg-green-700'
+              : 'bg-gray-400 text-white cursor-not-allowed'
+          }`}
+          disabled={!isPdfReady}
+        >
+          PDF 다운로드
+        </button>
+        <button
+          onClick={handleExcelDownload}
+          className={`px-6 py-3 rounded-full shadow-lg transition ease-in-out duration-300 ${
+            isPdfReady
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-gray-400 text-white cursor-not-allowed'
+          }`}
+          disabled={!isPdfReady}
+        >
+          Excel 다운로드
+        </button>
+      </div>
+    </>
   );
 };
 
@@ -501,30 +559,37 @@ const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProje
   // 검색 처리 함수
   const handleSearch = () => {
     if (!searchQuery.trim()) {
-      alert('검색어를 넣어주세요'); // 경고창 추가
+      alert('검색어를 넣어주세요');
       return;
     }
 
-    const query = searchQuery.toLowerCase(); // 검색어를 소문자로 변환하여 대소문자 구분 없이 검색
+    const query = searchQuery.toLowerCase();
     const filtered = newProjects.filter((project) => {
-      const inProjectList = projects.some(p => p.id === project.id); // 이미 프로젝트 목록에 있는지 확인
-      if (inProjectList) return false; // 이미 있는 프로젝트는 제외
+      const inProjectList = projects.some(p => p.id === project.id);
+      if (inProjectList) return false;
 
       switch (searchField) {
         case 'projectCode':
-          return generateProjectCode(project.id).toLowerCase().includes(query);
+          return project.id.toLowerCase().includes(query);
         case 'projectName':
-          return project.name && project.name.toLowerCase().includes(query);
+          return project.name.toLowerCase().includes(query);
         case 'projectManager':
-          return project.manager && project.manager.toLowerCase().includes(query);
+          return (project.manager || '').toLowerCase().includes(query);
         case 'contractCompany':
-          return project.contractCompany && project.contractCompany.toLowerCase().includes(query);
+          return (project.contractCompany || '').toLowerCase().includes(query);
         default:
           return false;
       }
     });
     setFilteredProjects(filtered);
-    setCurrentSearchPage(1); // 새로운 검색을 할 때 페이지를 첫 페이지로 초기화
+    setCurrentSearchPage(1);
+  };
+
+  // Enter 키를 눌렀을 때 검색 실행
+  const handleKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      handleSearch();
+    }
   };
 
   const handleLoadNewProject = useCallback((project) => {
@@ -533,8 +598,7 @@ const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProje
   }, [onLoadNewProject]);
 
   const generateProjectCode = (id) => {
-    const codeNumber = id; // id를 기반으로 고정된 코드 생성
-    return `DS${String(codeNumber).padStart(8, '0')}`;
+    return id; // 이미 프로젝트에 고정된 코드가 있다고 가정합니다.
   };
 
   const sortedProjects = projects
@@ -595,7 +659,7 @@ const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProje
           </thead>
           <tbody className="divide-y divide-gray-200">
             {sortedProjects
-              .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage) // 현재 페이지에 해당하는 프로젝트만 표시
+              .slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage)
               .map((project) => (
                 <tr key={project.id} className="bg-white hover:bg-gray-50 transition ease-in-out duration-300">
                   <td className="p-4">{generateProjectCode(project.id)}</td>
@@ -603,17 +667,15 @@ const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProje
                   <td className="p-4">{project.description}</td>
                   <td className="p-4">
                     <span className={`font-semibold ${
-                      project.isComplete
+                      project.status === '최종검토 완료'
                         ? 'text-green-600'
                         : project.status === '검토중'
                         ? 'text-yellow-600'
+                        : project.status === '검토대기'
+                        ? 'text-orange-600'
                         : 'text-red-600'
                     }`}>
-                      {project.isComplete
-                        ? '최종검토 완료'
-                        : project.status === '검토중'
-                        ? '검토중'
-                        : '검토대기'}
+                      {project.status}
                     </span>
                   </td>
                   <td className="p-4">
@@ -696,6 +758,7 @@ const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProje
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={handleKeyDown}
                 placeholder="검색어를 입력하세요"
                 className="w-full p-2 border border-gray-300 rounded"
               />
@@ -715,7 +778,7 @@ const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProje
                       onClick={() => handleLoadNewProject(project)}
                       className="w-full text-left"
                     >
-                      <span className="font-semibold text-gray-800">{generateProjectCode(project.id)} - {project.name}</span>
+                      <span className="font-semibold text-gray-800">{project.id} - {project.name}</span>
                       <p className="text-sm text-gray-600">{project.description}</p>
                     </button>
                   </li>
@@ -756,37 +819,36 @@ const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProje
   );
 };
 
-
 const ContractManagementDemo = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [projects, setProjects] = useState([
-    { id: 1, name: '프로젝트 A', description: 'AI 기반 고객 서비스 개선', status: '검토중', uploadDate: new Date('2024-08-20'), isComplete: false },
-    { id: 2, name: '프로젝트 B', description: '데이터 분석 플랫폼 구축', status: '미검토', uploadDate: new Date('2024-08-18'), isComplete: false },
-    { id: 3, name: '프로젝트 C', description: '클라우드 마이그레이션 프로젝트', status: '검토 완료', uploadDate: new Date('2024-08-19'), isComplete: true },
+    { id: 'DS000001', name: '프로젝트 A', description: 'AI 기반 고객 서비스 개선', status: '검토중', uploadDate: new Date('2024-08-20'), isComplete: false },
+    { id: 'DS000002', name: '프로젝트 B', description: '데이터 분석 플랫폼 구축', status: '검토대기', uploadDate: new Date('2024-08-18'), isComplete: false },
+    { id: 'DS000003', name: '프로젝트 C', description: '클라우드 마이그레이션 프로젝트', status: '최종검토 완료', uploadDate: new Date('2024-08-19'), isComplete: true },
   ]);
   const [selectedProject, setSelectedProject] = useState(null);
   const [newProjects, setNewProjects] = useState([
-    { id: 'new1', name: '신규 프로젝트 A', description: '새로운 AI 기반 솔루션 개발' },
-    { id: 'new2', name: '신규 프로젝트 B', description: '기존 시스템 업그레이드' },
-    { id: 'new3', name: '신규 프로젝트 C', description: '클라우드 마이그레이션' },
-    { id: 'new4', name: '신규 프로젝트 D', description: '고객 관리 시스템 개선' },
-    { id: 'new5', name: '신규 프로젝트 E', description: '데이터 시각화 툴 개발' },
-    { id: 'new6', name: '신규 프로젝트 F', description: '사내 교육 플랫폼 구축' },
-    { id: 'new7', name: '신규 프로젝트 G', description: '이커머스 플랫폼 업그레이드' },
-    { id: 'new8', name: '신규 프로젝트 H', description: '보안 시스템 강화' },
-    { id: 'new9', name: '신규 프로젝트 I', description: '인공지능 고객 서비스 도입' },
-    { id: 'new10', name: '신규 프로젝트 J', description: '클라우드 기반 백업 솔루션' },
-    { id: 'new11', name: '신규 프로젝트 K', description: '자동화 시스템 개발' },
-    { id: 'new12', name: '신규 프로젝트 L', description: '빅데이터 분석 시스템 구축' },
-    { id: 'new13', name: '신규 프로젝트 M', description: '데이터 웨어하우스 구축' },
-    { id: 'new14', name: '신규 프로젝트 N', description: '모바일 앱 개발' },
-    { id: 'new15', name: '신규 프로젝트 O', description: '스마트 팩토리 구축' },
-    { id: 'new16', name: '신규 프로젝트 P', description: 'AI 기반 예측 시스템 개발' },
-    { id: 'new17', name: '신규 프로젝트 Q', description: '마케팅 자동화 시스템 개발' },
-    { id: 'new18', name: '신규 프로젝트 R', description: '고객 데이터 분석 툴 개발' },
-    { id: 'new19', name: '신규 프로젝트 S', description: '사물인터넷(IoT) 플랫폼 개발' },
-    { id: 'new20', name: '신규 프로젝트 T', description: '자동차 자율주행 시스템 개발' },
+    { id: 'DS000021', name: '신규 프로젝트 A', description: '새로운 AI 기반 솔루션 개발' },
+    { id: 'DS000022', name: '신규 프로젝트 B', description: '기존 시스템 업그레이드' },
+    { id: 'DS000003', name: '신규 프로젝트 C', description: '클라우드 마이그레이션' },
+    { id: 'DS000004', name: '신규 프로젝트 D', description: '고객 관리 시스템 개선' },
+    { id: 'DS000005', name: '신규 프로젝트 E', description: '데이터 시각화 툴 개발' },
+    { id: 'DS000006', name: '신규 프로젝트 F', description: '사내 교육 플랫폼 구축' },
+    { id: 'DS000007', name: '신규 프로젝트 G', description: '이커머스 플랫폼 업그레이드' },
+    { id: 'DS000008', name: '신규 프로젝트 H', description: '보안 시스템 강화' },
+    { id: 'DS000009', name: '신규 프로젝트 I', description: '인공지능 고객 서비스 도입' },
+    { id: 'DS000010', name: '신규 프로젝트 J', description: '클라우드 기반 백업 솔루션' },
+    { id: 'DS000011', name: '신규 프로젝트 K', description: '자동화 시스템 개발' },
+    { id: 'DS000012', name: '신규 프로젝트 L', description: '빅데이터 분석 시스템 구축' },
+    { id: 'DS000013', name: '신규 프로젝트 M', description: '데이터 웨어하우스 구축' },
+    { id: 'DS000014', name: '신규 프로젝트 N', description: '모바일 앱 개발' },
+    { id: 'DS000015', name: '신규 프로젝트 O', description: '스마트 팩토리 구축' },
+    { id: 'DS000016', name: '신규 프로젝트 P', description: 'AI 기반 예측 시스템 개발' },
+    { id: 'DS000017', name: '신규 프로젝트 Q', description: '마케팅 자동화 시스템 개발' },
+    { id: 'DS000018', name: '신규 프로젝트 R', description: '고객 데이터 분석 툴 개발' },
+    { id: 'DS000019', name: '신규 프로젝트 S', description: '사물인터넷(IoT) 플랫폼 개발' },
+    { id: 'DS000020', name: '신규 프로젝트 T', description: '자동차 자율주행 시스템 개발' },
   ]);
 
   const [uploadedFiles, setUploadedFiles] = useState({});
@@ -799,7 +861,16 @@ const ContractManagementDemo = () => {
   }, []);
 
   const handleLoadNewProject = useCallback((newProject) => {
-    setProjects(prevProjects => [...prevProjects, { ...newProject, id: prevProjects.length + 1, status: '미검토', uploadDate: new Date(), isComplete: false }]);
+    setProjects(prevProjects => [
+      ...prevProjects,
+      {
+        ...newProject,
+        id: prevProjects.length + 1,
+        status: '계약서 업로드 대기중',
+        uploadDate: new Date(),
+        isComplete: false
+      }
+    ]);
     setNewProjects(prevNewProjects => prevNewProjects.filter(project => project.id !== newProject.id));
   }, []);
 
@@ -812,7 +883,7 @@ const ContractManagementDemo = () => {
       }));
       setProjects(prevProjects =>
         prevProjects.map(project =>
-          project.id === projectId ? { ...project, status: '검토 대기' } : project
+          project.id === projectId ? { ...project, status: '검토대기' } : project
         )
       );
     }
@@ -831,7 +902,7 @@ const ContractManagementDemo = () => {
   const handleReviewComplete = useCallback((projectId) => {
     setProjects(prevProjects =>
       prevProjects.map(project =>
-        project.id === projectId ? { ...project, isComplete: true } : project
+        project.id === projectId ? { ...project, status: '최종검토 완료', isComplete: true } : project
       )
     );
     setCurrentPage('projects');

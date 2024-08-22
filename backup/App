@@ -1,0 +1,515 @@
+import React, { useState, useCallback } from 'react';
+import jsPDF from 'jspdf';
+import 'jspdf-autotable';
+import { Line, Bar, Pie } from 'react-chartjs-2';
+import 'chart.js/auto';
+import logo from './assets/images/doosan2.png';  // 로고 이미지 경로 수정
+
+const NavBar = () => {
+  return (
+    <div className="flex items-center justify-between p-4 shadow-lg" style={{ backgroundColor: '#0861B5', opacity: 0.95 }}>
+      <img src={logo} alt="Doosan Logo" className="h-10" />
+      <button className="bg-white text-black px-4 py-2 rounded-full shadow-md hover:bg-gray-300 transition ease-in-out duration-300">
+        권한신청
+      </button>
+    </div>
+  );
+};
+
+const LoginPage = ({ onLogin }) => (
+  <div className="flex flex-col items-center justify-center h-screen bg-gradient-to-br from-blue-600 to-indigo-900 text-white">
+    <h1 className="text-4xl font-extrabold mb-6">Doosan Digital Innovation AI Contract Solution</h1>
+    <button onClick={onLogin} className="bg-white text-black px-6 py-3 rounded-full shadow-lg hover:bg-gray-300 transition ease-in-out duration-300">
+      로그인
+    </button>
+  </div>
+);
+
+const Dashboard = ({ projects }) => {
+  // 데이터 설정
+  const usedTokens = 1200000; // 예제 값
+  const allocatedTokens = 5000000; // 예제 값
+  const budget = 1000000; // 예산 (단위: 원)
+  const costPerToken = 0.01; // 토큰당 비용 (단위: 원)
+
+  const numReviewing = projects.filter(p => p.status === '검토중').length;
+  const numReviewed = projects.filter(p => p.status === '검토 완료').length;
+  const numNotReviewed = projects.filter(p => p.status === '미검토').length;
+
+  // 그래프 데이터
+  const resourceData = {
+    labels: ['Used Tokens', 'Allocated Tokens'],
+    datasets: [
+      {
+        label: 'LLM Resource Usage',
+        data: [usedTokens, allocatedTokens - usedTokens],
+        backgroundColor: ['#1c64f2', '#a0aec0'],
+      },
+    ],
+  };
+
+  const costData = {
+    labels: ['Used Budget', 'Remaining Budget'],
+    datasets: [
+      {
+        label: 'LLM Estimated Cost',
+        data: [usedTokens * costPerToken, budget - usedTokens * costPerToken],
+        backgroundColor: ['#22c55e', '#a0aec0'],
+      },
+    ],
+  };
+
+  const projectStatusData = {
+    labels: ['검토중', '검토 완료', '미검토'],
+    datasets: [
+      {
+        data: [numReviewing, numReviewed, numNotReviewed],
+        backgroundColor: ['#f97316', '#10b981', '#ef4444'],
+      },
+    ],
+  };
+
+  return (
+    <div className="p-8">
+      <h2 className="text-3xl font-semibold mb-8 text-gray-800">대시보드</h2>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+        <div className="p-6 bg-white rounded-lg shadow-lg">
+          <h3 className="text-lg font-semibold mb-4">LLM 리소스 사용 현황</h3>
+          <Bar data={resourceData} />
+        </div>
+        <div className="p-6 bg-white rounded-lg shadow-lg">
+          <h3 className="text-lg font-semibold mb-4">LLM 사용 예상 비용</h3>
+          <Bar data={costData} />
+        </div>
+        <div className="p-6 bg-white rounded-lg shadow-lg grid grid-cols-1 md:grid-cols-3 gap-4 col-span-1 md:col-span-2">
+          <div className="flex flex-col items-center">
+            <h3 className="text-lg font-semibold mb-2">프로젝트 상태</h3>
+            <div className="w-40 h-40">
+              <Pie data={projectStatusData} options={{ maintainAspectRatio: false }} />
+            </div>
+          </div>
+          <div className="flex flex-col items-center">
+            <h3 className="text-lg font-semibold mb-2">검토중</h3>
+            <div className="w-40 h-40">
+              <Pie data={{ ...projectStatusData, datasets: [{ data: [numReviewing, numReviewed + numNotReviewed], backgroundColor: ['#f97316', '#e5e7eb'] }] }} options={{ maintainAspectRatio: false }} />
+            </div>
+          </div>
+          <div className="flex flex-col items-center">
+            <h3 className="text-lg font-semibold mb-2">검토 완료</h3>
+            <div className="w-40 h-40">
+              <Pie data={{ ...projectStatusData, datasets: [{ data: [numReviewed, numReviewing + numNotReviewed], backgroundColor: ['#10b981', '#e5e7eb'] }] }} options={{ maintainAspectRatio: false }} />
+            </div>
+          </div>
+        </div>
+      </div>
+      <h3 className="text-2xl font-semibold mb-4 text-gray-800 mt-8">최근 업로드된 프로젝트</h3>
+      <ul>
+        {projects
+          .slice()
+          .sort((a, b) => b.uploadDate - a.uploadDate)
+          .slice(0, 5) // 최대 5개의 프로젝트만 표시
+          .map((project) => (
+            <li key={project.id} className="mb-2">
+              <a href="#" onClick={() => window.location.href=`/ai-checklist/${project.id}`} className="text-blue-500 hover:underline">
+                {project.name} - {project.description}
+              </a>
+            </li>
+          ))}
+      </ul>
+    </div>
+  );
+};
+
+
+const ProjectList = ({ projects = [], onProjectClick, onLoadNewProject, newProjects = [], uploadedFiles, handleFileUpload, handleFileDownload }) => {
+  const [showNewProjects, setShowNewProjects] = useState(false);
+
+  const handleLoadNewProject = useCallback((project) => {
+    onLoadNewProject(project);
+    setShowNewProjects(false);
+  }, [onLoadNewProject]);
+
+  const generateProjectCode = () => {
+    const codeNumber = Math.floor(Math.random() * 100000000);
+    return `DS${String(codeNumber).padStart(8, '0')}`;
+  };
+
+  return (
+    <div className="p-8">
+      <h2 className="text-3xl font-semibold mb-8 text-gray-800">프로젝트 목록</h2>
+      <table className="w-full border-collapse mb-8">
+        <thead>
+          <tr className="bg-gray-200">
+            <th className="p-4 text-left font-semibold text-gray-700">프로젝트 코드</th>
+            <th className="p-4 text-left font-semibold text-gray-700">프로젝트명</th>
+            <th className="p-4 text-left font-semibold text-gray-700">설명</th>
+            <th className="p-4 text-left font-semibold text-gray-700">액션</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200">
+          {projects.map((project) => (
+            <tr key={project.id} className="bg-white hover:bg-gray-50 transition ease-in-out duration-300">
+              <td className="p-4">{generateProjectCode()}</td>
+              <td className="p-4">{project.name}</td>
+              <td className="p-4">{project.description}</td>
+              <td className="p-4">
+                <input
+                  type="file"
+                  multiple
+                  onChange={(event) => handleFileUpload(project.id, event)}
+                  className="mb-2"
+                />
+                {uploadedFiles[project.id] && uploadedFiles[project.id].length > 0 && (
+                  <div className="mb-2">
+                    {uploadedFiles[project.id].map((file, index) => (
+                      <div key={index}>
+                        <a
+                          href="#"
+                          onClick={() => handleFileDownload(file)}
+                          className="text-blue-600 hover:underline"
+                        >
+                          {file.name}
+                        </a>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {uploadedFiles[project.id] && uploadedFiles[project.id].length > 0 && (
+                  <button
+                    onClick={() => onProjectClick(project)}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-full shadow-lg hover:bg-blue-700 transition ease-in-out duration-300"
+                  >
+                    AI 체크리스트 검토
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button
+        onClick={() => setShowNewProjects(true)}
+        className="bg-green-600 text-white px-4 py-2 rounded-full shadow-lg hover:bg-green-700 transition ease-in-out duration-300"
+      >
+        신규 프로젝트 불러오기
+      </button>
+      {showNewProjects && (
+        <div className="fixed inset-0 bg-gray-600 bg-opacity-50 overflow-y-auto h-full w-full flex justify-center items-center">
+          <div className="relative p-8 bg-white rounded-lg shadow-lg w-96">
+            <h3 className="text-lg font-bold mb-4">신규 프로젝트 목록</h3>
+            {newProjects.length > 0 ? (
+              <ul className="space-y-2">
+                {newProjects.map((project) => (
+                  <li key={project.id} className="p-4 bg-gray-100 rounded-md hover:bg-gray-200 transition ease-in-out duration-300">
+                    <button
+                      onClick={() => handleLoadNewProject(project)}
+                      className="w-full text-left"
+                    >
+                      <span className="font-semibold text-gray-800">{project.name}</span>
+                      <p className="text-sm text-gray-600">{project.description}</p>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>불러올 수 있는 신규 프로젝트가 없습니다.</p>
+            )}
+            <button
+              onClick={() => setShowNewProjects(false)}
+              className="mt-4 bg-gray-300 text-black px-4 py-2 rounded-full hover:bg-gray-400 transition ease-in-out duration-300"
+            >
+              닫기
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+
+
+const AIChecklist = ({ project }) => {
+  const checklistItems = [
+    {
+      category: '기본사항',
+      items: [
+        { name: '계약대상 업체명', result: 'PASS', comments: '' },
+        { name: '계약대상 대표자', result: 'FAIL', comments: '' },
+        { name: '계약대상 주소', result: '검토 필요', comments: '' },
+        { name: '계약목적', result: 'PASS', comments: '' },
+        { name: '계약조건', result: 'PASS', comments: '' },
+        { name: '계약의무', result: '검토 필요', comments: '' },
+        { name: '계약기간', result: 'FAIL', comments: '' },
+        { name: '계약일', result: 'PASS', comments: '' },
+        { name: '계약금액', result: 'PASS', comments: '' },
+        { name: '대금지급', result: '검토 필요', comments: '' },
+        { name: '대금지급시기', result: 'PASS', comments: '' },
+        { name: '대금지급 방법', result: 'PASS', comments: '' },
+      ],
+    },
+    {
+      category: '보증',
+      items: [
+        { name: '선급금이행보증', result: 'PASS', comments: '' },
+        { name: '계약이행보증', result: 'FAIL', comments: '' },
+        { name: '하자이행보증', result: '검토 필요', comments: '' },
+      ],
+    },
+    // 추가 카테고리들...
+  ];
+
+  const [checklist, setChecklist] = useState(checklistItems);
+  const [isReviewComplete, setIsReviewComplete] = useState(false);
+  const [isPdfReady, setIsPdfReady] = useState(false);
+
+  const handleCommentChange = (categoryIndex, itemIndex, value) => {
+    const updatedChecklist = [...checklist];
+    updatedChecklist[categoryIndex].items[itemIndex].comments = value;
+    setChecklist(updatedChecklist);
+  };
+
+  const handleReviewComplete = () => {
+    setIsReviewComplete(true);
+    setIsPdfReady(true);
+  };
+
+  const handleReviewCancel = () => {
+    setIsReviewComplete(false);
+    setIsPdfReady(false);
+  };
+
+  const handlePdfDownload = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(14);
+    doc.text(`AI Checklist - ${project.name}`, 20, 20);
+
+    checklist.forEach((category, categoryIndex) => {
+      const rows = category.items.map(item => [
+        item.name,
+        item.result,
+        item.comments || 'N/A',
+      ]);
+
+      doc.autoTable({
+        startY: doc.previousAutoTable ? doc.previousAutoTable.finalY + 10 : 30,
+        head: [[category.category, '검토 결과', '의견']],
+        body: rows,
+        theme: 'striped',
+      });
+    });
+
+    doc.save(`${project.name}-AI-Checklist.pdf`);
+  };
+
+  if (!project) {
+    return <div className="p-4">프로젝트를 선택해주세요.</div>;
+  }
+
+  return (
+    <div className="p-8">
+      <h2 className="text-3xl font-semibold mb-8 text-gray-800">AI 체크리스트 - {project.name}</h2>
+      <table className="w-full border-collapse mb-8">
+        <thead>
+          <tr className="bg-gray-200">
+            <th className="p-4 text-center font-semibold text-gray-700">대분류</th>
+            <th className="p-4 text-center font-semibold text-gray-700">세부 항목</th>
+            <th className="p-4 text-center font-semibold text-gray-700">검토 결과</th>
+            <th className="p-4 text-center font-semibold text-gray-700">의견 작성</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-200">
+          {checklist.map((category, categoryIndex) => (
+            <React.Fragment key={categoryIndex}>
+              {category.items.map((item, itemIndex) => (
+                <tr key={itemIndex} className="bg-white">
+                  {itemIndex === 0 && (
+                    <td
+                      className="p-4 text-center font-semibold bg-gray-100"
+                      rowSpan={category.items.length}
+                    >
+                      {category.category}
+                    </td>
+                  )}
+                  <td className="p-4 text-center">{item.name}</td>
+                  <td className="p-4 text-center">
+                    <span
+                      className={`px-2 py-1 rounded-full text-sm font-semibold ${
+                        item.result === 'PASS'
+                          ? 'bg-green-200 text-green-800'
+                          : item.result === 'FAIL'
+                          ? 'bg-red-200 text-red-800'
+                          : 'bg-yellow-200 text-yellow-800'
+                      }`}
+                    >
+                      {item.result}
+                    </span>
+                  </td>
+                  <td className="p-4 text-center">
+                    <input
+                      type="text"
+                      value={item.comments}
+                      onChange={(e) =>
+                        handleCommentChange(categoryIndex, itemIndex, e.target.value)
+                      }
+                      className="w-full border border-gray-300 rounded-full p-2"
+                      placeholder="의견을 작성하세요"
+                      disabled={isReviewComplete}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </React.Fragment>
+          ))}
+        </tbody>
+      </table>
+      <div className="flex justify-end space-x-4">
+        {isReviewComplete ? (
+          <button
+            onClick={handleReviewCancel}
+            className="bg-red-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-red-700 transition ease-in-out duration-300"
+          >
+            검토 취소
+          </button>
+        ) : (
+          <button
+            onClick={handleReviewComplete}
+            className="bg-blue-600 text-white px-6 py-3 rounded-full shadow-lg hover:bg-blue-700 transition ease-in-out duration-300"
+          >
+            최종 검토 완료
+          </button>
+        )}
+        <button
+          onClick={handlePdfDownload}
+          className={`px-6 py-3 rounded-full shadow-lg transition ease-in-out duration-300 ${
+            isPdfReady
+              ? 'bg-green-600 text-white hover:bg-green-700'
+              : 'bg-gray-400 text-white cursor-not-allowed'
+          }`}
+          disabled={!isPdfReady}
+        >
+          PDF 다운로드
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const ContractManagementDemo = () => {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentPage, setCurrentPage] = useState('dashboard');
+  const [projects, setProjects] = useState([
+    { id: 1, name: '프로젝트 A', description: 'AI 기반 고객 서비스 개선', status: '검토중', uploadDate: new Date('2024-08-20') },
+    { id: 2, name: '프로젝트 B', description: '데이터 분석 플랫폼 구축', status: '미검토', uploadDate: new Date('2024-08-18') },
+    { id: 3, name: '프로젝트 C', description: '클라우드 마이그레이션 프로젝트', status: '검토 완료', uploadDate: new Date('2024-08-19') },
+  ]);
+  const [selectedProject, setSelectedProject] = useState(null);
+  const [newProjects, setNewProjects] = useState([
+    { id: 'new1', name: '신규 프로젝트 A', description: '새로운 AI 기반 솔루션 개발' },
+    { id: 'new2', name: '신규 프로젝트 B', description: '기존 시스템 업그레이드' },
+    { id: 'new3', name: '신규 프로젝트 C', description: '클라우드 마이그레이션' },
+  ]);
+
+  const [uploadedFiles, setUploadedFiles] = useState({});
+
+  const handleLogin = useCallback(() => setIsLoggedIn(true), []);
+  
+  const handleProjectClick = useCallback((project) => {
+    setSelectedProject(project);
+    setCurrentPage('ai-checklist');
+  }, []);
+
+  const handleLoadNewProject = useCallback((newProject) => {
+    setProjects(prevProjects => [...prevProjects, { ...newProject, id: prevProjects.length + 1, status: '미검토', uploadDate: new Date() }]);
+    setNewProjects(prevNewProjects => prevNewProjects.filter(project => project.id !== newProject.id));
+  }, []);
+
+  const handleFileUpload = useCallback((projectId, event) => {
+    const files = Array.from(event.target.files);
+    if (files.length > 0) {
+      setUploadedFiles(prevFiles => ({
+        ...prevFiles,
+        [projectId]: [...(prevFiles[projectId] || []), ...files],
+      }));
+    }
+  }, []);
+
+  const handleFileDownload = useCallback((file) => {
+    const url = URL.createObjectURL(file);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = file.name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  }, []);
+
+  const renderContent = useCallback(() => {
+    switch (currentPage) {
+      case 'dashboard':
+        return <Dashboard projects={projects} />;
+      case 'projects':
+        return (
+          <ProjectList 
+            projects={projects} 
+            onProjectClick={handleProjectClick}
+            onLoadNewProject={handleLoadNewProject}
+            newProjects={newProjects}
+            uploadedFiles={uploadedFiles}
+            handleFileUpload={handleFileUpload}
+            handleFileDownload={handleFileDownload}
+          />
+        );
+      case 'ai-checklist':
+        return <AIChecklist project={selectedProject} />;
+      default:
+        return <Dashboard />;
+    }
+  }, [currentPage, projects, handleProjectClick, handleLoadNewProject, newProjects, selectedProject, uploadedFiles, handleFileUpload, handleFileDownload]);
+
+  if (!isLoggedIn) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  return (
+    <div>
+      <NavBar /> {/* 상단 바 추가 */}
+      <div className="flex h-screen bg-gray-100">
+        <div className="w-64 bg-gray-800 text-white p-4">
+          <h1 className="text-2xl font-bold mb-6">계약 관리 시스템</h1>
+          <nav>
+            <ul>
+              <li className="mb-2">
+                <button
+                  onClick={() => setCurrentPage('dashboard')}
+                  className={`w-full text-left p-2 rounded ${
+                    currentPage === 'dashboard' ? 'bg-blue-500' : 'hover:bg-gray-700'
+                  }`}
+                >
+                  대시보드
+                </button>
+              </li>
+              <li className="mb-2">
+                <button
+                  onClick={() => {
+                    setCurrentPage('projects');
+                    setSelectedProject(null);
+                  }}
+                  className={`w-full text-left p-2 rounded ${
+                    currentPage === 'projects' ? 'bg-blue-500' : 'hover:bg-gray-700'
+                  }`}
+                >
+                  프로젝트 목록
+                </button>
+              </li>
+            </ul>
+          </nav>
+        </div>
+        <div className="flex-1 overflow-auto">
+          {renderContent()}
+        </div>
+      </div>
+    </div>
+  );
+};
+export default ContractManagementDemo;
